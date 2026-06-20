@@ -1,4 +1,4 @@
-# 🤖 多智能体编排系统 (LangGraph_ReflexGraph)
+# 多智能体编排系统 (LangGraph_ReflexGraph)
 
 基于 LangGraph 构建的多智能体编排系统，具备需求分析、任务规划、动态子Agent调度和执行反思诊断能力。
 
