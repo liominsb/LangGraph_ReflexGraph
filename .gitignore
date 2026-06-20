@@ -95,18 +95,12 @@ htmlcov/
 *.log
 logs/
 
-# data files (consider carefully - you might want to track some)
-# Uncomment or add specific patterns if you don't want to track data files
-# *.csv
-# *.json
-# *.xlsx
-# *.sqlite
+# data files not to upload
+agent_code_evaluation.md
+my_token_costs.csv
 
-# generated files (custom based on your project)
-graph.png
+# other generated or temp files
 token_analysis_report.png
-
-# other
 *.tmp
 *.bak
 *.backup
