@@ -136,3 +136,8 @@ def my_tool(param: str) -> str:
 ```
 
 工具会自动被扫描注册到工具集中。
+---
+
+## Graph Visualization
+
+![Graph](graph.png)
