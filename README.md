@@ -63,18 +63,18 @@ TAVILY_API_KEY=你的Tavily密钥
 ### 3. 运行
 
 ```bash
-python LangGraph练习.py
+python main.py
 ```
 
 ## 📁 文件说明
 
-| 文件 | 说明 |
-|------|------|
-| `LangGraph练习.py` | 主程序，LangGraph状态图定义 |
-| `my_tools.py` | 工具定义（搜索、文件操作、计算等） |
-| `tools_set.py` | 工具集合与动态子Agent调度 |
-| `my_prompt.py` | 所有Prompt模板 |
-| `utils.py` | Token统计工具函数 |
+| 文件                     | 说明 |
+|------------------------|------|
+| `main.py`              | 主程序，LangGraph状态图定义 |
+| `my_tools.py`          | 工具定义（搜索、文件操作、计算等） |
+| `tools_set.py`         | 工具集合与动态子Agent调度 |
+| `my_prompt.py`         | 所有Prompt模板 |
+| `utils.py`             | Token统计工具函数 |
 | `csv_Visualization.py` | Token消耗可视化报告生成 |
 
 ## 💡 使用示例
