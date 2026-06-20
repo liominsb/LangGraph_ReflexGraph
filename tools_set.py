@@ -12,10 +12,13 @@ apiKey = os.getenv("LLM_API_KEY")
 base_url = os.getenv("LLM_BASE_URL")
 
 
-sub_tools = my_tools.get_all_tools(my_tools, "write_to_file", "append_to_file", "ask_human")
+sub_tools = my_tools.get_all_tools(my_tools, "write_to_file", "append_to_file", "ask_human","search_and_replace_code")
 # 2. 组装全局注册表供 Prompt 动态读取
 TOOL_REGISTRY = {tool.name: tool for tool in sub_tools}
 AVAILABLE_TOOLS_DESC = ", ".join(TOOL_REGISTRY.keys())
+
+
+
 
 
 # 3. 定义高级调度工具

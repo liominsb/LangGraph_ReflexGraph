@@ -2,8 +2,9 @@
 import inspect
 import json
 import os
+import py_compile
 from datetime import datetime
-
+import re
 import chardet
 import numexpr  # 推荐使用 numexpr，比直接用 eval 安全得多
 import requests
@@ -154,32 +155,109 @@ def write_to_file(filepath: str, content: str) -> str:
     except Exception as e:
         return f"写入文件失败：{str(e)}"
 
-@tool(description="读取当前的文件夹的文件列表，无传入，返回包含所有文件名的字符串")
-def get_listdir() -> str:  # 明确声明返回 str
-    """获取当前目录下的文件列表"""
-    try:
-        files = os.listdir('.')
-        if not files:
-            return "当前目录为空。"
 
-        # 将列表转换为带有换行符的清晰文本，便于 LLM 阅读
-        formatted_list = "\n".join(f"- {f}" for f in files)
-        return f"当前目录下的文件和文件夹有：\n{formatted_list}"
+@tool(description="读取指定目录的文件列表。传入目标路径（默认为当前目录 '.'），返回包含所有文件和子目录名称的字符串。")
+def get_listdir(path: str = ".") -> str:
+    """带路径遍历的文件导航工具"""
+    try:
+        if not os.path.exists(path):
+            return f"错误：路径不存在 - {path}"
+        if not os.path.isdir(path):
+            return f"错误：目标不是一个目录 - {path}"
+
+        items = os.listdir(path)
+        if not items:
+            return f"目录 '{path}' 为空。"
+
+        # 区分文件和文件夹，方便 Agent 理解结构
+        dirs = [d for d in items if os.path.isdir(os.path.join(path, d))]
+        files = [f for f in items if os.path.isfile(os.path.join(path, f))]
+
+        formatted_list = f"目录 [{os.path.abspath(path)}] 的内容：\n"
+        if dirs:
+            formatted_list += "📁 文件夹:\n" + "\n".join(f"  - {d}/" for d in dirs) + "\n"
+        if files:
+            formatted_list += "📄 文件:\n" + "\n".join(f"  - {f}" for f in files)
+
+        return formatted_list
 
     except Exception as e:
         return f"读取目录失败，错误信息：{str(e)}"
 
-@tool(description="读取指定路径的文件的内容，传入文件路径，返回文件内容的字符串")
+@tool(description="读取指定路径的文件的内容。默认带有行号以便于后续的精确修改。如果文件很大，建议先读取关键部分。")
 def read_from_file(filepath: str) -> str:
-    """读取指定路径的文件的内容，返回文件内容的字符串"""
-    encoding=get_encoding(filepath)
+    """读取文件并自动追加行号"""
+    encoding = get_encoding(filepath)
     try:
         with open(filepath, 'r', encoding=encoding) as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"错误：文件不存在 - {filepath}"
+            lines = f.readlines()
+
+        # 限制单次读取的大小，防止撑爆 Context
+        if len(lines) > 300:
+            return f"错误：文件过大（{len(lines)}行）。为了安全，请使用专门的局部读取工具。"
+
+        numbered_content = ""
+        for i, line in enumerate(lines, start=1):
+            # 将每一行格式化为 "1: import os"
+            numbered_content += f"{i:4d} | {line}"
+
+        return f"文件 {filepath} 的内容如下：\n{numbered_content}"
     except Exception as e:
         return f"错误：无法读取文件 - {e}"
+
+
+@tool(description="【代码检索工具】在文件中搜索指定的关键字或正则表达式，返回匹配行的上下文（含行号）。用于在修改代码前定位目标函数或变量。")
+def grep_search(filepath: str, pattern: str, context_lines: int = 2) -> str:
+    """正则表达式全局检索工具"""
+    encoding = get_encoding(filepath)
+    try:
+        with open(filepath, 'r', encoding=encoding) as f:
+            lines = f.readlines()
+
+        results = []
+        for i, line in enumerate(lines):
+            if re.search(pattern, line):
+                # 提取匹配行的前后文
+                start = max(0, i - context_lines)
+                end = min(len(lines), i + context_lines + 1)
+
+                results.append(f"--- 匹配结果 (行 {i + 1}) ---")
+                for j in range(start, end):
+                    prefix = ">>" if j == i else "  "
+                    results.append(f"{j + 1:4d} {prefix} {lines[j].rstrip()}")
+
+        if not results:
+            return f"未在 {filepath} 中找到匹配 '{pattern}' 的内容。"
+
+        return "\n".join(results)
+    except Exception as e:
+        return f"检索失败：{str(e)}"
+
+
+@tool(description="【修改代码核心工具】在文件中搜索一段精确的旧代码块，并将其替换为新代码块。必须保证 old_block 与文件中的原文（包括空格和缩进）完全一致。")
+def search_and_replace_code(filepath: str, old_block: str, new_block: str) -> str:
+    """基于精确代码块匹配的替换工具，防范大模型行号幻觉。"""
+    encoding = get_encoding(filepath)
+    try:
+        with open(filepath, 'r', encoding=encoding) as f:
+            content = f.read()
+
+        # 检查旧代码块是否存在，且只存在一处（防止误替换）
+        count = content.count(old_block)
+        if count == 0:
+            return f"替换失败：在文件 {filepath} 中未找到完全匹配的 old_block。请检查缩进、换行或特殊字符是否绝对一致。"
+        if count > 1:
+            return f"替换失败：在文件 {filepath} 中找到 {count} 处匹配的 old_block。目标必须是唯一的，请包含更多的上下文代码以确保 old_block 的唯一性。"
+
+        # 执行替换
+        new_content = content.replace(old_block, new_block)
+
+        with open(filepath, 'w', encoding=encoding) as f:
+            f.write(new_content)
+
+        return f"代码修改成功！已在 {filepath} 中完成指定代码块的替换。"
+    except Exception as e:
+        return f"代码替换发生系统错误：{str(e)}"
 
 @tool(description="【追加内容必用】在文件的最后追加内容，传入文件路径和内容，返回操作结果。")
 def append_to_file(filepath: str, content: str) -> str:
@@ -275,3 +353,14 @@ def call_api(url: str, method: str = "GET", headers: dict = None, data: dict = N
         return f"请求失败：{str(e)}"
     except Exception as e:
         return f"API调用失败：{str(e)}"
+
+@tool(description="检查 Python 文件的基础语法（不执行代码）。修改 Python 代码后必须调用此工具进行验证。")
+def check_python_syntax(filepath: str) -> str:
+    """防御代码被修改至崩溃的最后一道防线。"""
+    if not filepath.endswith('.py'):
+        return "这不是一个 Python 文件，跳过语法检查。"
+    try:
+        py_compile.compile(filepath, doraise=True)
+        return "语法检查通过：未发现基础语法错误（SyntaxError）。"
+    except py_compile.PyCompileError as e:
+        return f"严重错误！代码修改导致了语法崩溃：\n{str(e)}"
