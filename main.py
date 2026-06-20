@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import Annotated
 
+import httpx
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage
@@ -25,10 +26,14 @@ class State(TypedDict):
     #反思记忆（建议覆盖模式：str）
     reflection: str
 
+timeout_config = httpx.Timeout(30.0)
+
 llm = init_chat_model("mimo-v2.5",
                       model_provider="openai",
                       api_key=apiKey,
                       base_url=base_url,
+                      timeout=timeout_config,  # 注入超时配置
+                      max_retries=10            # 发生超时或网络错误时最多重试10次
                       )
 
 tool_node = ToolNode(tools=tools_set.all_tools)
