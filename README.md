@@ -13,17 +13,8 @@
 
 ## 🏗️ 工作流程
 
-```
-用户输入
-    ↓
-interpret_llm (需求分析师 - 分析意图)
-    ↓
-chatbot (主Agent - 任务规划/工具调用)
-    ↓
-tool_node (工具执行) ←→ reflect_llm (反思诊断)
-    ↓
-输出结果
-```
+![Graph](graph.png)
+
 
 ## 🛠️ 内置工具
 
@@ -138,6 +129,3 @@ def my_tool(param: str) -> str:
 工具会自动被扫描注册到工具集中。
 ---
 
-## Graph Visualization
-
-![Graph](graph.png)
