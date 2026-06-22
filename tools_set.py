@@ -1,4 +1,9 @@
 import os
+import sys
+
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from sqlalchemy.engine import create
+
 import my_tools
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
@@ -10,6 +15,7 @@ load_dotenv()
 EMBED_API_KEY = os.getenv("EMBED_API_KEY")
 apiKey = os.getenv("LLM_API_KEY")
 base_url = os.getenv("LLM_BASE_URL")
+github_key = os.getenv("GITHUB_API_KEY")
 
 
 sub_tools = my_tools.get_all_tools(my_tools, "write_to_file", "append_to_file", "ask_human","search_and_replace_code")
@@ -58,5 +64,34 @@ async def create_sub_agent(query: str, tool_names: list[str]) -> str:
 
     return last_message.content
 
+@tool(description="【涉及github专用】使用集成github工具包的Agent执行任务，只有读取权限。必须传入任务指令 query")
+async def create_github_sub_agent(query: str) -> str:
+    client = MultiServerMCPClient({
+        "github": {
+            "command": "github-mcp-server.exe",
+            "args": ["stdio", "--read-only"],
+            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": github_key},
+            "transport": "stdio",
+        }
+    })
+    llm = init_chat_model("mimo-v2.5",
+                          model_provider="openai",
+                          api_key=apiKey,
+                          base_url=base_url,
+                          )
+
+    # 动态编译子 Agent
+    sub_agent = create_agent(
+        model=llm,
+        tools=await client.get_tools(),
+        system_prompt=my_prompt.sub_prompt
+    )
+    sub_input = {"messages": [{"role": "user", "content": query}]}
+    result = await sub_agent.ainvoke(sub_input)
+    last_message = result["messages"][-1]
+    utils.parse_and_print_token_usage(last_message, task_name=query, agent_type="子Agent")
+
+    return last_message.content
+
 base_tools = my_tools.get_all_tools(my_tools)
-all_tools = base_tools + [create_sub_agent]
+all_tools = base_tools + [create_sub_agent]+[create_github_sub_agent]
