@@ -26,7 +26,7 @@ class State(TypedDict):
     #反思记忆（建议覆盖模式：str）
     reflection: str
 
-timeout_config = httpx.Timeout(30.0)
+timeout_config = httpx.Timeout(100.0)
 
 llm = init_chat_model("mimo-v2.5",
                       model_provider="openai",
@@ -139,7 +139,23 @@ async def main():
     while True:
         if state.interrupts:
             print(state.interrupts[0].value)
-        content = input(">")
+        print("（输入完毕后连按两次回车）")
+        lines = []
+        empty_count = 0
+        while True:
+            line = input(">" if not lines else ">>")
+            if line == "":
+                empty_count += 1
+                if empty_count >= 2:
+                    break
+                lines.append(line)
+            else:
+                empty_count = 0
+                lines.append(line)
+
+        content = "\n".join(lines)
+        if not content:
+            continue
         if content == "exit":
             break
         if content == "<<1":
