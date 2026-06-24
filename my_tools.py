@@ -2,6 +2,7 @@
 import inspect
 import json
 import os
+import subprocess
 import py_compile
 from datetime import datetime
 import re
@@ -364,3 +365,79 @@ def check_python_syntax(filepath: str) -> str:
         return "语法检查通过：未发现基础语法错误（SyntaxError）。"
     except py_compile.PyCompileError as e:
         return f"严重错误！代码修改导致了语法崩溃：\n{str(e)}"
+
+
+@tool(description="【代码执行工具】运行指定的 Python 文件，返回 stdout、stderr 和退出码。可选传入命令行参数 cli_args（空格分隔）。超时默认30秒。用于验证代码修改是否正确。")
+def run_python_file(filepath: str, cli_args: str = "", timeout: int = 30) -> str:
+    """运行 Python 文件并捕获全部输出"""
+    if not os.path.exists(filepath):
+        return f"错误：文件不存在 - {filepath}"
+    if not filepath.endswith('.py'):
+        return f"警告：{filepath} 不是 .py 文件，跳过执行。"
+
+    try:
+        cmd = ["python", filepath]
+        if cli_args:
+            cmd.extend(cli_args.split())
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+            cwd=os.path.dirname(os.path.abspath(filepath)) or "."
+        )
+
+        output_parts = []
+        if result.stdout:
+            output_parts.append(f"【stdout】:\n{result.stdout}")
+        if result.stderr:
+            output_parts.append(f"【stderr】:\n{result.stderr}")
+        output_parts.append(f"【退出码】: {result.returncode}")
+
+        full_output = "\n".join(output_parts)
+        if len(full_output) > 5000:
+            full_output = full_output[:5000] + f"\n... [输出已截断，总长度 {len(full_output)} 字符]"
+
+        status = "✅ 成功" if result.returncode == 0 else "❌ 失败"
+        return f"{status} | 运行 {filepath}\n{full_output}"
+
+    except subprocess.TimeoutExpired:
+        return f"⏰ 超时：{filepath} 在 {timeout} 秒内未完成执行。可能存在死循环或阻塞操作。"
+    except Exception as e:
+        return f"❌ 执行失败：{str(e)}"
+
+
+@tool(description="【快速验证工具】直接运行一段 Python 代码片段（不需要保存为文件），返回执行结果。适合快速测试表达式、验证逻辑。")
+def run_python_snippet(code: str, timeout: int = 15) -> str:
+    """直接执行 Python 代码片段"""
+    try:
+        result = subprocess.run(
+            ["python", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+        output_parts = []
+        if result.stdout:
+            output_parts.append(f"【输出】:\n{result.stdout}")
+        if result.stderr:
+            output_parts.append(f"【错误】:\n{result.stderr}")
+        output_parts.append(f"【退出码】: {result.returncode}")
+
+        full_output = "\n".join(output_parts)
+        if len(full_output) > 3000:
+            full_output = full_output[:3000] + "\n... [截断]"
+
+        status = "✅" if result.returncode == 0 else "❌"
+        return f"{status}\n{full_output}"
+
+    except subprocess.TimeoutExpired:
+        return f"⏰ 超时（{timeout}秒）：代码可能包含死循环"
+    except Exception as e:
+        return f"❌ 执行失败：{str(e)}"
