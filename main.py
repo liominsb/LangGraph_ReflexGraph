@@ -28,7 +28,7 @@ class State(TypedDict):
 
 timeout_config = httpx.Timeout(100.0)
 
-llm = init_chat_model("mimo-v2.5",
+llm = init_chat_model("mimo-v2.5-pro",
                       model_provider="openai",
                       api_key=apiKey,
                       base_url=base_url,
