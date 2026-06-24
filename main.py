@@ -139,20 +139,14 @@ async def main():
     while True:
         if state.interrupts:
             print(state.interrupts[0].value)
-        print("（输入完毕后连按两次回车）")
+        print("（输入完毕后输入END）")
         lines = []
-        empty_count = 0
+        print(">>")
         while True:
-            line = input(">" if not lines else ">>")
-            if line == "":
-                empty_count += 1
-                if empty_count >= 2:
-                    break
-                lines.append(line)
-            else:
-                empty_count = 0
-                lines.append(line)
-
+            line = input()
+            if line == "END":
+                break
+            lines.append(line)
         content = "\n".join(lines)
         if not content:
             continue
@@ -179,9 +173,13 @@ async def main():
             payload = Command(resume={"data": content})
         else:
             payload = {"messages": [{"role": "user", "content": content}]}
+        prev_msg_count = 0
         async for event in graph.astream(payload, config, stream_mode="values"):
-            event["messages"][-1].pretty_print()
-            utils.parse_and_print_token_usage(event["messages"][-1], task_name=content, agent_type="主Agent")
+            current_msg_count = len(event["messages"])
+            if current_msg_count > prev_msg_count:
+                event["messages"][-1].pretty_print()
+                utils.parse_and_print_token_usage(event["messages"][-1], task_name=content, agent_type="主Agent")
+                prev_msg_count = current_msg_count
         state = graph.get_state(config)
 
     # for state in graph.get_state_history(config):

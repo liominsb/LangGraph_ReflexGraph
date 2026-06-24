@@ -56,7 +56,7 @@ sub_prompt="""
 这里是原代码...
 """
 
-interpret_bot_prompt=""""
+interpret_bot_prompt="""
 # 角色：需求预处理专家
 
 你的唯一任务是：读取用户最新的一条输入，输出一句简短的任务摘要，帮助主Agent快速理解用户意图。

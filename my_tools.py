@@ -35,10 +35,10 @@ def get_all_tools(module, *exclude):
 
 
 def get_encoding(file):
-    if not os.path.exists(file):
+    if not os.path.exists(file) or not os.path.isfile(file):  # 加 isfile 检查
         return 'utf-8'
     with open(file, 'rb') as f:
-        result = chardet.detect(f.read())
+        result = chardet.detect(f.read(8192))  # 只读前 8KB
         return result['encoding']
 
 @tool(description="使用TavilySearch工具进行搜索,当你想要搜索日期相关的请先使用get_today_date工具 传入str关键词，返回搜索结果的字符串信息")
@@ -193,7 +193,7 @@ def read_from_file(filepath: str) -> str:
             lines = f.readlines()
 
         # 限制单次读取的大小，防止撑爆 Context
-        if len(lines) > 300:
+        if len(lines) > 1000:
             return f"错误：文件过大（{len(lines)}行）。为了安全，请使用专门的局部读取工具。"
 
         numbered_content = ""
