@@ -28,6 +28,10 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
     #反思记忆（建议覆盖模式：str）
     reflection: str
+    #任务规划（覆盖模式：str，由 task_agent 节点生成）
+    task_plan: str
+    #任务进度（覆盖模式：str，由 reflect_llm 节点更新）
+    task_progress: str
     total_tokens: Annotated[int, operator.add]
 
 timeout_config = httpx.Timeout(100.0)
@@ -81,13 +85,39 @@ async def memory_manager(state: State):
     return {}
 
 
+from pydantic import BaseModel, Field
+
+class ReflectionOutput(BaseModel):
+    """反思节点的结构化输出"""
+    diagnosis: str = Field(description="诊断结论：如果一切正常填'一切正常'，否则填纠错指令")
+    progress: str = Field(default="", description="执行进度：各步骤的完成状态")
+    current_status: str = Field(default="", description="当前状态：一句话描述当前在做什么")
+
+
 tool_node = ToolNode(tools=tools_set.all_tools)
 llm_with_tools = llm.bind_tools(tools=tools_set.all_tools)
+llm_reflect = llm.with_structured_output(ReflectionOutput)
 
 
 async def chatbot(state: State):
     sys_msg = SystemMessage(content=my_prompt.one_prompt)
     full_messages = [sys_msg] + state["messages"]
+
+    # 注入任务规划
+    task_plan = state.get("task_plan", "")
+    if task_plan:
+        plan_msg = SystemMessage(
+            content=f"【任务规划】\n{task_plan}\n\n请严格按照以上计划执行。"
+        )
+        full_messages.insert(1, plan_msg)
+
+    # 注入任务进度
+    task_progress = state.get("task_progress", "")
+    if task_progress:
+        progress_msg = SystemMessage(
+            content=f"【任务进度】\n{task_progress}"
+        )
+        full_messages.insert(2, progress_msg)
 
     reflection_content = state.get("reflection", "")
     if reflection_content:
@@ -105,14 +135,11 @@ async def chatbot(state: State):
 
 
 async def reflect_llm(state: State):
-    # 1. 提取原生对象
+    # 1. 提取最近消息
     recent_messages = state["messages"][-6:]
 
-    # 2. 【核心修复】：将 Message 对象降维打包成纯文本格式的“诊断日志”
-    # 这样模型看到的是一份“案卷”，而不是正在进行的对话
     trajectory_lines = []
     for msg in recent_messages:
-        # 根据不同消息类型提取可读内容
         if msg.type == "human":
             trajectory_lines.append(f"用户提问: {msg.content}")
         elif msg.type == "ai":
@@ -125,28 +152,76 @@ async def reflect_llm(state: State):
 
     trajectory_str = "\n".join(trajectory_lines)
 
+    # 2. 构建 prompt
+    task_plan = state.get("task_plan", "")
+    task_progress = state.get("task_progress", "")
+
     sys_msg = SystemMessage(content=my_prompt.reflect_prompt)
-    human_msg = HumanMessage(
-        content=f"请你作为独立的审查员，诊断以下执行轨迹记录，严格按照你的系统设定输出结论。\n\n【执行轨迹记录】\n{trajectory_str}"
-    )
 
-    # 4. 执行反思
-    response = await llm.ainvoke([sys_msg, human_msg])
-    print("\n[Critic 反思结果] =>", response.content)
+    if task_plan:
+        human_msg = HumanMessage(
+            content=f"""【任务规划】
+{task_plan}
 
-    # 5. 状态更新
-    if "一切正常" in response.content:
-        return {"reflection": ""}
+【上次进度】
+{task_progress if task_progress else "尚未开始"}
 
+【最近执行轨迹】
+{trajectory_str}"""
+        )
+    else:
+        human_msg = HumanMessage(
+            content=f"【执行轨迹记录】\n{trajectory_str}"
+        )
+
+    # 3. 结构化输出
+    response: ReflectionOutput = await llm_reflect.ainvoke([sys_msg, human_msg])
+    print(f"\n[Critic 反思结果] => 诊断: {response.diagnosis}")
+
+    current_cost = 0  # with_structured_output 可能不返回 token 信息，兜底
+
+    # 4. 构建返回值
+    result = {"total_tokens": current_cost}
+
+    if response.diagnosis == "一切正常":
+        result["reflection"] = ""
+    else:
+        result["reflection"] = response.diagnosis
+
+    # 5. 有任务规划时更新进度
+    if task_plan:
+        progress_text = ""
+        if response.progress:
+            progress_text += response.progress
+        if response.current_status:
+            progress_text += f"\n\n【当前状态】\n{response.current_status}"
+        result["task_progress"] = progress_text
+
+    return result
+
+async def task_agent(state: State):
+    last_msg = state["messages"][-1]
+    # 只在有新 human 消息时才规划
+    if last_msg.type != "human":
+        return {}
+
+    response = await llm.ainvoke([
+        SystemMessage(content=my_prompt.task_prompt),
+        HumanMessage(content=last_msg.content)
+    ])
     current_cost = utils.get_total_tokens(response)
-    return {"reflection": response.content,"total_tokens":current_cost}
+    print(f"\n[Task Agent 规划结果]\n{response.content}\n")
+    return {"task_plan": response.content, "task_progress": "", "total_tokens": current_cost}
+
 
 graph_builder = StateGraph(State)
+graph_builder.add_node("task_agent", task_agent)
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tool_node", tool_node)
 graph_builder.add_node("reflect_llm", reflect_llm)
 graph_builder.add_node("memory_manager", memory_manager)
-graph_builder.add_edge(START, "chatbot")
+graph_builder.add_edge(START, "task_agent")
+graph_builder.add_edge("task_agent", "chatbot")
 graph_builder.add_conditional_edges(
     "chatbot",
     tools_condition,
