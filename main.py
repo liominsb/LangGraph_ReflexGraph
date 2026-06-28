@@ -28,7 +28,7 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
     #反思记忆（建议覆盖模式：str）
     reflection: str
-    #任务规划（覆盖模式：str，由 task_agent 节点生成）
+    #任务规划（覆盖模式：str，由 task_llm 节点生成）
     task_plan: str
     #任务进度（覆盖模式：str，由 reflect_llm 节点更新）
     task_progress: str
@@ -199,7 +199,7 @@ async def reflect_llm(state: State):
 
     return result
 
-async def task_agent(state: State):
+async def task_llm(state: State):
     last_msg = state["messages"][-1]
     # 只在有新 human 消息时才规划
     if last_msg.type != "human":
@@ -215,13 +215,13 @@ async def task_agent(state: State):
 
 
 graph_builder = StateGraph(State)
-graph_builder.add_node("task_agent", task_agent)
+graph_builder.add_node("task_llm", task_llm)
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tool_node", tool_node)
 graph_builder.add_node("reflect_llm", reflect_llm)
 graph_builder.add_node("memory_manager", memory_manager)
-graph_builder.add_edge(START, "task_agent")
-graph_builder.add_edge("task_agent", "chatbot")
+graph_builder.add_edge(START, "task_llm")
+graph_builder.add_edge("task_llm", "chatbot")
 graph_builder.add_conditional_edges(
     "chatbot",
     tools_condition,
