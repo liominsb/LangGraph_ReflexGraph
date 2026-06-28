@@ -10,11 +10,11 @@ def get_total_tokens(message: BaseMessage) -> int:
     if getattr(message, 'type', '') != "ai":
         return 0
 
-        # 1. 优先尝试新版 LangChain 标准格式
+    # 1. 优先尝试新版 LangChain 标准格式
     if hasattr(message, 'usage_metadata') and message.usage_metadata:
         return message.usage_metadata.get('total_tokens', 0)
 
-        # 2. 兜底旧版或特定模型的嵌套格式
+    # 2. 兜底旧版或特定模型的嵌套格式
     if hasattr(message, 'response_metadata') and message.response_metadata:
         usage = message.response_metadata.get('token_usage') or message.response_metadata.get('usage') or {}
         return usage.get('total_tokens', 0)
@@ -43,9 +43,9 @@ def count_context_tokens(messages: list[BaseMessage], model_name: str = "gpt-4o"
 
     return num_tokens
 
-def get_JsonCounter()->int:
+def get_json_counter() -> int:
+    """读取会话计数器"""
     state_file = "counter.json"
-    # 读取计数器
     if os.path.exists(state_file):
         with open(state_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -54,7 +54,16 @@ def get_JsonCounter()->int:
         session_counter = 1
     return session_counter
 
-def UpdateJsonCounter(session_counter:int)->None:
+
+# 保持向后兼容
+get_JsonCounter = get_json_counter
+
+def update_json_counter(session_counter: int) -> None:
+    """更新会话计数器"""
     state_file = "counter.json"
     with open(state_file, 'w', encoding='utf-8') as f:
         json.dump({"counter": session_counter}, f)
+
+
+# 保持向后兼容
+UpdateJsonCounter = update_json_counter

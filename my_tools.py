@@ -322,7 +322,7 @@ def call_api(url: str, method: str = "GET", headers: dict = None, data: dict = N
         try:
             response_json = response.json()
             response_content = json.dumps(response_json, indent=2, ensure_ascii=False)
-        except:
+        except (ValueError, KeyError):
             response_content = response.text
         
         # 检查响应长度
