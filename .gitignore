@@ -107,3 +107,12 @@ token_analysis_report.png
 *.orig
 *.rej
 *~
+
+# SQLite checkpoints
+checkpoints.db
+checkpoints.db-shm
+checkpoints.db-wal
+
+# Runtime
+counter.json
+full_project_context.txt
