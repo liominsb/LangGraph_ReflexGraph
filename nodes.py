@@ -2,12 +2,13 @@ from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from langgraph.prebuilt import ToolNode
 
 from graph import config, my_prompt, utils, tools_set
-from graph.state import State, ReflectionOutput
+from graph.state import State, ReflectionOutput, TaskPlanOutput
 
 # ── 工具 / LLM 绑定 ──
 tool_node = ToolNode(tools=tools_set.all_tools)
 llm_with_tools = config.llm.bind_tools(tools=tools_set.all_tools)
 llm_reflect = config.llm.with_structured_output(ReflectionOutput)
+llm_task = config.llm.with_structured_output(TaskPlanOutput)
 
 
 async def memory_manager(state: State):
@@ -56,11 +57,16 @@ async def chatbot(state: State):
         )
         full_messages.insert(1, plan_msg)
 
-    # 注入任务进度
-    task_progress = state.get("task_progress", "")
-    if task_progress:
+    # 注入任务进度（从结构化 task_steps 格式化为 checklist）
+    task_steps = state.get("task_steps", [])
+    if task_steps:
+        checklist_lines = []
+        for s in task_steps:
+            mark = "[x]" if s["status"] == "completed" else "[ ]"
+            title = s.get("title") or s.get("name", "?")
+            checklist_lines.append(f"- {mark} 步骤{s['step']}: {title}")
         progress_msg = SystemMessage(
-            content=f"【任务进度】\n{task_progress}"
+            content=f"【任务进度】\n" + "\n".join(checklist_lines)
         )
         full_messages.insert(2, progress_msg)
 
@@ -100,17 +106,27 @@ async def reflect_llm(state: State):
 
     # 2. 构建 prompt
     task_plan = state.get("task_plan", "")
-    task_progress = state.get("task_progress", "")
+    task_steps = state.get("task_steps", [])
 
     sys_msg = SystemMessage(content=my_prompt.reflect_prompt)
 
     if task_plan:
+        # 格式化当前步骤进度
+        steps_summary = ""
+        if task_steps:
+            steps_lines = []
+            for s in task_steps:
+                mark = "[x]" if s["status"] == "completed" else "[ ]"
+                title = s.get("title") or s.get("name", "?")
+                steps_lines.append(f"- {mark} 步骤{s['step']}: {title}")
+            steps_summary = "\n".join(steps_lines)
+
         human_msg = HumanMessage(
             content=f"""【任务规划】
 {task_plan}
 
-【上次进度】
-{task_progress if task_progress else "尚未开始"}
+【当前步骤进度】
+{steps_summary if steps_summary else "尚未开始"}
 
 【最近执行轨迹】
 {trajectory_str}"""
@@ -126,7 +142,7 @@ async def reflect_llm(state: State):
 
     current_cost = 0  # with_structured_output 可能不返回 token 信息，兜底
 
-    # 4. 构建返回值
+    # 4. 构建返回值（只做诊断，不再更新 task_steps）
     result = {"total_tokens": current_cost}
 
     if response.diagnosis == "一切正常":
@@ -134,29 +150,33 @@ async def reflect_llm(state: State):
     else:
         result["reflection"] = response.diagnosis
 
-    # 5. 有任务规划时更新进度
-    if task_plan:
-        progress_text = ""
-        if response.progress:
-            progress_text += response.progress
-        if response.current_status:
-            progress_text += f"\n\n【当前状态】\n{response.current_status}"
-        result["task_progress"] = progress_text
-
     return result
 
 
 async def task_llm(state: State):
     """任务规划节点：对新的 human 消息生成结构化任务计划"""
     last_msg = state["messages"][-1]
-    # 只在有新 human 消息时才规划
     if last_msg.type != "human":
         return {}
 
-    response = await config.llm.ainvoke([
+    response: TaskPlanOutput = await llm_task.ainvoke([
         SystemMessage(content=my_prompt.task_prompt),
         HumanMessage(content=last_msg.content)
     ])
-    current_cost = utils.get_total_tokens(response)
-    print(f"\n[Task Agent 规划结果]\n{response.content}\n")
-    return {"task_plan": response.content, "task_progress": "", "total_tokens": current_cost}
+
+    # 初始化所有步骤状态为 pending
+    task_steps = []
+    for i, step in enumerate(response.steps, start=1):
+        title = step.get("title") or step.get("name", f"步骤{i}")
+        task_steps.append({
+            "step": step.get("step", i),
+            "title": title,
+            "status": "pending"
+        })
+
+    print(f"\n[Task Agent 规划结果]\n{response.plan}\n")
+    print(f"[任务步骤] 共 {len(task_steps)} 步")
+    for s in task_steps:
+        print(f"  - [ ] 步骤{s['step']}: {s['title']}")
+
+    return {"task_plan": response.plan, "task_steps": task_steps, "total_tokens": 0}

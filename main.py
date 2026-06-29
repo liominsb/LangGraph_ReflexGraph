@@ -6,6 +6,18 @@ from graph.graph_builder import graph_builder
 from graph import utils
 
 
+def _format_task_steps(task_steps):
+    """将 task_steps 列表格式化为 checklist 字符串"""
+    if not task_steps:
+        return ""
+    lines = []
+    for s in task_steps:
+        mark = "[x]" if s.get("status") == "completed" else "[ ]"
+        title = s.get("title") or s.get("name", "?")
+        lines.append(f"  - {mark} 步骤{s.get('step', '?')}: {title}")
+    return "\n".join(lines)
+
+
 def _print_welcome():
     print("你好！很高兴见到你！😊")
     print("有什么我可以帮你的吗？无论是日常问题、工作协助还是闲聊，我都很乐意陪你聊聊！")
@@ -51,11 +63,18 @@ async def main():
                             if msg_id not in printed_ids:
                                 msg.pretty_print()
                                 printed_ids.add(msg_id)
-                    state = await graph.aget_state(config)
-                    total_session_cost = state.values.get("total_tokens", 0)
-                    print("\n" + "=" * 40)
-                    print(f"本次交互总计消耗 Token: {total_session_cost}")
-                    print("=" * 40 + "\n")
+                                state = await graph.aget_state(config)
+                                task_steps = state.values.get("task_steps", [])
+                                total_session_cost = state.values.get("total_tokens", 0)
+                                task_plan = state.values.get("task_plan", "")
+                                print("\n" + "=" * 40)
+                                print("任务进度:")
+                                print(_format_task_steps(task_steps))
+                                print("\n" + "=" * 40)
+                                print(f"{task_plan}")
+                                print("\n" + "=" * 40)
+                                print(f"本次交互总计消耗 Token: {total_session_cost}")
+                                print("=" * 40 + "\n")
         while True:
             if state.interrupts:
                 print(state.interrupts[0].value)
@@ -102,13 +121,19 @@ async def main():
                     if msg_id not in printed_ids:
                         msg.pretty_print()
                         printed_ids.add(msg_id)
+                        state = await graph.aget_state(config)
+                        task_steps = state.values.get("task_steps", [])
+                        total_session_cost = state.values.get("total_tokens", 0)
+                        task_plan = state.values.get("task_plan", "")
+                        print("\n" + "=" * 40)
+                        print("任务进度:")
+                        print(_format_task_steps(task_steps))
+                        print("\n" + "=" * 40)
+                        print(f"{task_plan}")
+                        print("\n" + "=" * 40)
+                        print(f"本次交互总计消耗 Token: {total_session_cost}")
+                        print("=" * 40 + "\n")
 
-            # Token 消耗统计移到流式循环外，只打印一次
-            state = await graph.aget_state(config)
-            total_session_cost = state.values.get("total_tokens", 0)
-            print("\n" + "=" * 40)
-            print(f"本次交互总计消耗 Token: {total_session_cost}")
-            print("=" * 40 + "\n")
 
 
 if __name__ == "__main__":

@@ -11,9 +11,12 @@ import numexpr  # 推荐使用 numexpr，比直接用 eval 安全得多
 import requests
 from dotenv import load_dotenv
 
-from langchain_core.tools import tool, BaseTool
+from typing import Annotated
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import tool, BaseTool, InjectedToolCallId
 from langchain_tavily import TavilySearch
-from langgraph.types import interrupt
+from langgraph.prebuilt import InjectedState
+from langgraph.types import Command, interrupt
 
 load_dotenv()
 tavily_api_key=os.getenv("TAVILY_API_KEY")
@@ -354,6 +357,79 @@ def call_api(url: str, method: str = "GET", headers: dict = None, data: dict = N
         return f"请求失败：{str(e)}"
     except Exception as e:
         return f"API调用失败：{str(e)}"
+
+
+@tool(description="【进度追踪】更新任务步骤状态。传入步骤编号(step)和新状态(status: pending/in_progress/completed)。每完成一个关键步骤后必须调用此工具。")
+def update_task_progress(
+    step: int,
+    status: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState],
+) -> Command:
+    """更新任务步骤状态，通过 Command 直接写入 State"""
+    valid_statuses = {"pending", "in_progress", "completed"}
+    if status not in valid_statuses:
+        return Command(
+            update={"messages": [ToolMessage(
+                content=f"错误：无效状态 '{status}'，必须是 {valid_statuses} 之一",
+                tool_call_id=tool_call_id,
+                name="update_task_progress",
+            )]}
+        )
+
+    # 从 State 读取当前步骤列表
+    task_steps = list(state.get("task_steps", []))
+    if not task_steps:
+        return Command(
+            update={"messages": [ToolMessage(
+                content="错误：当前没有任务步骤，可能尚未生成任务规划",
+                tool_call_id=tool_call_id,
+                name="update_task_progress",
+            )]}
+        )
+
+    # 深拷贝后修改
+    import copy
+    new_steps = copy.deepcopy(task_steps)
+    updated = False
+    for s in new_steps:
+        if s.get("step") == step:
+            s["status"] = status
+            updated = True
+            break
+
+    if not updated:
+        available = [s.get("step") for s in new_steps]
+        return Command(
+            update={"messages": [ToolMessage(
+                content=f"错误：步骤编号 {step} 不存在，当前可用步骤: {available}",
+                tool_call_id=tool_call_id,
+                name="update_task_progress",
+            )]}
+        )
+
+    # 打印当前进度
+    print("\n[进度更新]")
+    for s in new_steps:
+        mark = "[x]" if s["status"] == "completed" else "[ ]"
+        title = s.get("title") or s.get("name", "?")
+        print(f"  {mark} 步骤{s['step']}: {title}")
+
+    # 生成确认消息
+    target = next(s for s in new_steps if s["step"] == step)
+    title = target.get("title") or target.get("name", "?")
+    confirm = f"步骤{step}「{title}」状态已更新为 {status}"
+
+    return Command(
+        update={
+            "task_steps": new_steps,
+            "messages": [ToolMessage(
+                content=confirm,
+                tool_call_id=tool_call_id,
+                name="update_task_progress",
+            )],
+        }
+    )
 
 @tool(description="检查 Python 文件的基础语法（不执行代码）。修改 Python 代码后必须调用此工具进行验证。")
 def check_python_syntax(filepath: str) -> str:
